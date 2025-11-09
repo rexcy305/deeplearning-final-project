@@ -1,24 +1,40 @@
 # utils/detector.py
 import numpy as np
+import streamlit as st
 from ultralytics import YOLO
+import os
 
 _model = None
 
-def load_model(model_path=None):
+def load_model(model_path=None, custom_model_file=None):
+    """
+    Load YOLO model.
+    - Jika user upload model .pt, maka itu yang dipakai.
+    - Jika tidak, gunakan model default (yolov11n.pt).
+    """
     global _model
     if _model is not None:
         return _model
+
     try:
-        if model_path:
+        if custom_model_file is not None:
+            # Simpan model upload ke file temporer
+            temp_model_path = os.path.join("models", custom_model_file.name)
+            os.makedirs("models", exist_ok=True)
+            with open(temp_model_path, "wb") as f:
+                f.write(custom_model_file.read())
+            st.sidebar.success(f"Custom model '{custom_model_file.name}' loaded.")
+            _model = YOLO(temp_model_path)
+        elif model_path:
             _model = YOLO(model_path)
         else:
-            # try load default yolov11 (if present) else fallback to yolov8n (if ultralytics has it)
-            try:
-                _model = YOLO("yolov11.pt")
-            except Exception:
-                _model = YOLO("yolov8n.pt")
+            # Gunakan default jika tidak ada upload
+            default_path = "yolov8s.pt"
+            _model = YOLO(default_path)
         return _model
+
     except Exception as e:
+        st.error(f"Failed to load model: {e}")
         raise RuntimeError(f"Failed to load model: {e}")
 
 def detect_image_numpy(img_bgr, conf=0.25, imgsz=640):

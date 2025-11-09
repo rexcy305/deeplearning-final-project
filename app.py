@@ -21,20 +21,38 @@ st.set_page_config(
 st.title("🔍 YOLOv11 Web App — Image Enhancement + Counting + Region Box")
 
 # -----------------------------
-# LOAD MODEL
-# -----------------------------
-with st.spinner("Loading YOLO model..."):
-    try:
-        model = load_model()
-        st.success("✅ Model loaded successfully.")
-    except Exception as e:
-        st.error(f"Error loading model: {e}")
-        st.stop()
-
-# -----------------------------
 # SIDEBAR SETTINGS
 # -----------------------------
 st.sidebar.header("⚙️ Settings")
+
+# 🧠 Custom Model Upload
+st.sidebar.markdown("---")
+st.sidebar.subheader("🧠 Custom Model (Optional)")
+custom_model_file = st.sidebar.file_uploader(
+    "Upload your YOLO model (.pt)", type=["pt"], key="custom_model"
+)
+
+# -----------------------------
+# LOAD MODEL (with custom option)
+# -----------------------------
+with st.spinner("Loading YOLO model..."):
+    try:
+        model = load_model(custom_model_file=custom_model_file)
+        st.success("✅ Model loaded successfully.")
+    except Exception as e:
+        st.error(f"❌ Error loading model: {e}")
+        st.stop()
+
+# Menampilkan model yang aktif
+try:
+    model_name = model.model.name if hasattr(model, "model") else "Custom Model"
+except Exception:
+    model_name = "Unknown Model"
+st.sidebar.info(f"📦 Current model: {model_name}")
+
+# -----------------------------
+# MAIN SETTINGS
+# -----------------------------
 upload_type = st.sidebar.radio("Upload type", ["Image", "Video"])
 enh_choice = st.sidebar.selectbox(
     "Enhancement", ["Ori", "Histogram Equalization (HE)", "CLAHE", "Contrast Stretching"]
@@ -42,6 +60,9 @@ enh_choice = st.sidebar.selectbox(
 conf_thres = st.sidebar.slider("Confidence threshold", 0.1, 0.9, 0.25, 0.05)
 imgsz = st.sidebar.selectbox("Inference size (px)", [320, 480, 640, 960], index=2)
 
+# -----------------------------
+# REGION SETTINGS
+# -----------------------------
 st.sidebar.markdown("---")
 st.sidebar.subheader("📍 Region Settings")
 use_region = st.sidebar.checkbox("Show / use region for region-counting", value=True)
@@ -82,41 +103,40 @@ def apply_enh(img_bgr, choice):
         return contrast_stretch(img_bgr)
     return img_bgr
 
-
 # -----------------------------
-# MAIN PROCESS (IMAGE)
+# MAIN PROCESS
 # -----------------------------
 if uploaded_file is None:
-    st.info("Upload an image or video to start.")
+    st.info("👈 Upload an image or video to start.")
     st.stop()
 
+# -----------------------------
+# IMAGE PROCESS
+# -----------------------------
 if upload_type == "Image":
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
     if img is None:
-        st.error("Cannot read image.")
+        st.error("❌ Cannot read image.")
         st.stop()
 
-    # Metrics before
+    # Metrics before/after
     before_metrics = compute_brightness_contrast_metrics(img)
     enhanced = apply_enh(img.copy(), enh_choice)
     after_metrics = compute_brightness_contrast_metrics(enhanced)
 
-    # --- Visual comparison (Before vs After)
+    # Visual comparison
     colA, colB = st.columns(2)
     colA.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), caption="Original Image", use_container_width=True)
     colB.image(cv2.cvtColor(enhanced, cv2.COLOR_BGR2RGB),
-               caption=f"Enhanced Image ({enh_choice})",
-               use_container_width=True)
+               caption=f"Enhanced Image ({enh_choice})", use_container_width=True)
 
-    # --- Detection
+    # Detection
     to_detect = enhanced if enh_choice != "Ori" else img
     boxes, _ = detect_image_numpy(to_detect, conf=conf_thres, imgsz=imgsz)
 
-    # --- Compute average confidence
-    avg_conf = np.mean([b[4] for b in boxes]) if len(boxes) > 0 else 0.0
+    avg_conf = np.mean([b[4] for b in boxes]) if boxes else 0.0
 
-    # --- Draw results
     display_img = to_detect.copy()
     for b in boxes:
         x1, y1, x2, y2, conf, cls_name, cls_id = b
@@ -125,9 +145,8 @@ if upload_type == "Image":
                     (int(x1), int(y1) - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-    # --- Region Box with label
     region_counts = {}
-    if use_region and region_spec is not None:
+    if use_region and region_spec:
         rx1, ry1, rx2, ry2 = region_spec
         cv2.rectangle(display_img, (int(rx1), int(ry1)), (int(rx2), int(ry2)), (0, 0, 255), 2)
         cv2.putText(display_img, "Region Area", (int(rx1) + 5, int(ry1) - 10),
@@ -139,11 +158,9 @@ if upload_type == "Image":
                         (int(rx1) + 5, int(ry1) + 25),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
 
-    # --- Counting
     total_counts = count_all(boxes) if enable_counting else {}
     total_detections = sum(total_counts.values()) if total_counts else 0
 
-    # --- Display result
     col1, col2 = st.columns([1.5, 1])
     col1.image(cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB),
                caption="Detection Result with Region Box",
@@ -159,11 +176,9 @@ if upload_type == "Image":
         if use_region:
             st.write("**Objects inside Region:**")
             st.json(region_counts)
-
         st.markdown("**Brightness / Contrast (Before → After)**")
         st.json({"Before": before_metrics, "After": after_metrics})
 
-        # Save data
         if st.button("💾 Add to Report"):
             row = {
                 "file": uploaded_file.name,
@@ -188,12 +203,11 @@ if upload_type == "Image":
                 st.success(f"Saved report to {out}")
 
 # -----------------------------
-# VIDEO (Enhanced Detection Logic)
+# VIDEO PROCESS (Enhanced)
 # -----------------------------
 elif upload_type == "Video":
     tfile = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1])
     tfile.write(uploaded_file.read())
-    tfile.flush()
     video_path = tfile.name
 
     cap = cv2.VideoCapture(video_path)
@@ -216,33 +230,27 @@ elif upload_type == "Video":
             break
         frame_idx += 1
 
-        # Enhance video frame
         enhanced = apply_enh(frame.copy(), enh_choice)
         to_detect = enhanced if enh_choice != "Ori" else frame
 
-        # Deteksi YOLO
         boxes, _ = detect_image_numpy(to_detect, conf=conf_thres, imgsz=imgsz)
-        avg_conf = np.mean([b[4] for b in boxes]) if len(boxes) > 0 else 0.0
+        avg_conf = np.mean([b[4] for b in boxes]) if boxes else 0.0
         avg_conf_list.append(avg_conf)
 
-        # Hitung jumlah objek
         total_counts = count_all(boxes) if enable_counting else {}
         region_counts = count_in_region(boxes, region_spec) if use_region and region_spec else {}
 
-        # Akumulasi hasil total
         for k, v in total_counts.items():
             total_counts_all[k] = total_counts_all.get(k, 0) + v
         for k, v in region_counts.items():
             total_region_counts_all[k] = total_region_counts_all.get(k, 0) + v
 
-        # Gambar bounding box
         for b in boxes:
             x1, y1, x2, y2, conf, cls_name, cls_id = b
             cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
             cv2.putText(frame, f"{cls_name} {conf:.2f}", (int(x1), int(y1) - 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-        # Region box
         if use_region and region_spec:
             rx1, ry1, rx2, ry2 = region_spec
             cv2.rectangle(frame, (int(rx1), int(ry1)), (int(rx2), int(ry2)), (0, 0, 255), 2)
@@ -253,7 +261,6 @@ elif upload_type == "Video":
                         (int(rx1) + 5, int(ry1) + 25),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
 
-        # Tampilkan info frame
         total_objs = sum(total_counts.values()) if total_counts else 0
         cv2.putText(frame, f"Frame {frame_idx}/{total_frames}", (10, 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
@@ -267,9 +274,6 @@ elif upload_type == "Video":
 
     cap.release()
 
-    # -----------------------------
-    # Display summary after video
-    # -----------------------------
     st.success("✅ Video processing finished — data summary below.")
     st.subheader("🎬 Video Summary")
     st.write(f"**Enhancement:** {enh_choice}")
