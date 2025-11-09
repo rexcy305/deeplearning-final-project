@@ -188,7 +188,7 @@ if upload_type == "Image":
                 st.success(f"Saved report to {out}")
 
 # -----------------------------
-# VIDEO (same detection logic)
+# VIDEO (Enhanced Detection Logic)
 # -----------------------------
 elif upload_type == "Video":
     tfile = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1])
@@ -198,7 +198,7 @@ elif upload_type == "Video":
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        st.error("Cannot open video.")
+        st.error("❌ Cannot open video.")
         st.stop()
 
     stframe = st.empty()
@@ -206,30 +206,76 @@ elif upload_type == "Video":
     frame_idx = 0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 1)
 
+    total_counts_all = {}
+    total_region_counts_all = {}
+    avg_conf_list = []
+
     while True:
         ret, frame = cap.read()
         if not ret:
             break
         frame_idx += 1
 
+        # Enhance video frame
         enhanced = apply_enh(frame.copy(), enh_choice)
         to_detect = enhanced if enh_choice != "Ori" else frame
+
+        # Deteksi YOLO
         boxes, _ = detect_image_numpy(to_detect, conf=conf_thres, imgsz=imgsz)
+        avg_conf = np.mean([b[4] for b in boxes]) if len(boxes) > 0 else 0.0
+        avg_conf_list.append(avg_conf)
+
+        # Hitung jumlah objek
+        total_counts = count_all(boxes) if enable_counting else {}
+        region_counts = count_in_region(boxes, region_spec) if use_region and region_spec else {}
+
+        # Akumulasi hasil total
+        for k, v in total_counts.items():
+            total_counts_all[k] = total_counts_all.get(k, 0) + v
+        for k, v in region_counts.items():
+            total_region_counts_all[k] = total_region_counts_all.get(k, 0) + v
+
+        # Gambar bounding box
         for b in boxes:
             x1, y1, x2, y2, conf, cls_name, cls_id = b
             cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-            cv2.putText(frame, f"{cls_name} {conf:.2f}",
-                        (int(x1), int(y1) - 5),
+            cv2.putText(frame, f"{cls_name} {conf:.2f}", (int(x1), int(y1) - 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-        if use_region and region_spec is not None:
+        # Region box
+        if use_region and region_spec:
             rx1, ry1, rx2, ry2 = region_spec
             cv2.rectangle(frame, (int(rx1), int(ry1)), (int(rx2), int(ry2)), (0, 0, 255), 2)
             cv2.putText(frame, "Region Area", (int(rx1) + 5, int(ry1) - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            total_in_region = sum(region_counts.values())
+            cv2.putText(frame, f"Objs in Region: {total_in_region}",
+                        (int(rx1) + 5, int(ry1) + 25),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+
+        # Tampilkan info frame
+        total_objs = sum(total_counts.values()) if total_counts else 0
+        cv2.putText(frame, f"Frame {frame_idx}/{total_frames}", (10, 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(frame, f"Detections: {total_objs}", (10, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(frame, f"Avg Conf: {avg_conf:.2f}", (10, 75),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
 
         stframe.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_container_width=True)
         progress_bar.progress(min(frame_idx / total_frames, 1.0))
 
     cap.release()
-    st.success("Video processing finished — screenshot this for report.")
+
+    # -----------------------------
+    # Display summary after video
+    # -----------------------------
+    st.success("✅ Video processing finished — data summary below.")
+    st.subheader("🎬 Video Summary")
+    st.write(f"**Enhancement:** {enh_choice}")
+    st.write(f"**Average Confidence (Overall):** {np.mean(avg_conf_list):.2f}")
+    st.write("**Total Objects Detected (All Frames):**")
+    st.json(total_counts_all)
+    if use_region:
+        st.write("**Total Objects in Region (All Frames):**")
+        st.json(total_region_counts_all)
