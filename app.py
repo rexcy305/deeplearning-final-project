@@ -1,11 +1,10 @@
 import streamlit as st
-from PIL import Image
-import cv2, tempfile, os, time, numpy as np
+import cv2, tempfile, os, numpy as np
 from utils.enhancements import (
     hist_eq_color,
     clahe_color,
     contrast_stretch,
-    compute_brightness_contrast_metrics,
+    compute_brightness_contrast_metrics
 )
 from utils.detector import detect_image_numpy, load_model
 from utils.counting import count_all, count_in_region
@@ -16,18 +15,18 @@ from utils.reporting import save_metrics_rows
 # -----------------------------
 st.set_page_config(
     page_title="YOLOv11 Web App - Enhancement + Counting + Region",
-    layout="wide",
+    layout="wide"
 )
-st.title("🔍 YOLOv11 Web App — Image Enhancement + Counting + Region Box")
+st.title("Object Detection — Image Enhancement + Counting + Region Box")
 
 # -----------------------------
 # SIDEBAR SETTINGS
 # -----------------------------
-st.sidebar.header("⚙️ Settings")
+# st.sidebar.header
 
-# 🧠 Custom Model Upload
+# Custom Model Upload
 st.sidebar.markdown("---")
-st.sidebar.subheader("🧠 Custom Model (Optional)")
+st.sidebar.subheader("Custom Model (Optional)")
 custom_model_file = st.sidebar.file_uploader(
     "Upload your YOLO model (.pt)", type=["pt"], key="custom_model"
 )
@@ -38,17 +37,10 @@ custom_model_file = st.sidebar.file_uploader(
 with st.spinner("Loading YOLO model..."):
     try:
         model = load_model(custom_model_file=custom_model_file)
-        st.success("✅ Model loaded successfully.")
+        st.success("Model loaded successfully.")
     except Exception as e:
-        st.error(f"❌ Error loading model: {e}")
+        st.error(f"Error loading model: {e}")
         st.stop()
-
-# Menampilkan model yang aktif
-try:
-    model_name = model.model.name if hasattr(model, "model") else "Custom Model"
-except Exception:
-    model_name = "Unknown Model"
-st.sidebar.info(f"📦 Current model: {model_name}")
 
 # -----------------------------
 # MAIN SETTINGS
@@ -58,21 +50,21 @@ enh_choice = st.sidebar.selectbox(
     "Enhancement", ["Ori", "Histogram Equalization (HE)", "CLAHE", "Contrast Stretching"]
 )
 conf_thres = st.sidebar.slider("Confidence threshold", 0.1, 0.9, 0.25, 0.05)
-imgsz = st.sidebar.selectbox("Inference size (px)", [320, 480, 640, 960], index=2)
+imgsz = st.sidebar.selectbox("Inference size (px)", [320, 480, 640, 960, 1080, 2048], index=2)
 
 # -----------------------------
 # REGION SETTINGS
 # -----------------------------
 st.sidebar.markdown("---")
-st.sidebar.subheader("📍 Region Settings")
+st.sidebar.subheader("Region Settings")
 use_region = st.sidebar.checkbox("Show / use region for region-counting", value=True)
 region_spec = None
 if use_region:
     st.sidebar.markdown("Enter region coordinates (x1, y1, x2, y2)")
-    rx1 = st.sidebar.number_input("x1", min_value=0, value=50)
+    rx1 = st.sidebar.number_input("x1", min_value=0, value=100)
     ry1 = st.sidebar.number_input("y1", min_value=0, value=50)
-    rx2 = st.sidebar.number_input("x2", min_value=1, value=400)
-    ry2 = st.sidebar.number_input("y2", min_value=1, value=300)
+    rx2 = st.sidebar.number_input("x2", min_value=1, value=500)
+    ry2 = st.sidebar.number_input("y2", min_value=1, value=400)
     region_spec = (rx1, ry1, rx2, ry2)
 
 st.sidebar.markdown("---")
@@ -107,7 +99,7 @@ def apply_enh(img_bgr, choice):
 # MAIN PROCESS
 # -----------------------------
 if uploaded_file is None:
-    st.info("👈 Upload an image or video to start.")
+    st.info("Upload an image or video to start.")
     st.stop()
 
 # -----------------------------
@@ -117,7 +109,7 @@ if upload_type == "Image":
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
     if img is None:
-        st.error("❌ Cannot read image.")
+        st.error("Cannot read image.")
         st.stop()
 
     # Metrics before/after
@@ -133,7 +125,7 @@ if upload_type == "Image":
 
     # Detection
     to_detect = enhanced if enh_choice != "Ori" else img
-    boxes, _ = detect_image_numpy(to_detect, conf=conf_thres, imgsz=imgsz)
+    boxes = detect_image_numpy(to_detect, conf=conf_thres, imgsz=imgsz, model=model)
 
     avg_conf = np.mean([b[4] for b in boxes]) if boxes else 0.0
 
@@ -167,17 +159,37 @@ if upload_type == "Image":
                use_container_width=True)
 
     with col2:
-        st.subheader("📊 Detection Summary")
+        st.subheader("Detection Summary")
         st.write(f"**Enhancement:** {enh_choice}")
         st.write(f"**Total Detections:** {total_detections}")
         st.write(f"**Average Confidence (Accuracy):** {avg_conf:.2f}")
         st.write("**Objects per Class:**")
-        st.json(total_counts)
+        if total_counts:
+            summary_table = [{"Class": k, "Total": v} for k, v in total_counts.items()]
+            st.table(summary_table)
+        else:
+            st.write("No objects detected.")
         if use_region:
             st.write("**Objects inside Region:**")
-            st.json(region_counts)
-        st.markdown("**Brightness / Contrast (Before → After)**")
-        st.json({"Before": before_metrics, "After": after_metrics})
+            if region_counts:
+                region_table = [{"Class": k, "Total": v} for k, v in region_counts.items()]
+                st.table(region_table)
+            else:
+                st.write("No objects inside region.")
+        st.markdown("### Brightness / Contrast (Before → After)")
+
+        brightness_before = before_metrics["brightness_mean"]
+        contrast_before = before_metrics["contrast_std"]
+
+        brightness_after = after_metrics["brightness_mean"]
+        contrast_after = after_metrics["contrast_std"]
+
+        comparison_table = [
+            {"Metric": "Brightness Mean", "Before": brightness_before, "After": brightness_after},
+            {"Metric": "Contrast Std", "Before": contrast_before, "After": contrast_after},
+        ]
+
+        st.table(comparison_table)
 
         if st.button("💾 Add to Report"):
             row = {
@@ -212,7 +224,7 @@ elif upload_type == "Video":
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        st.error("❌ Cannot open video.")
+        st.error("Cannot open video.")
         st.stop()
 
     stframe = st.empty()
@@ -233,7 +245,7 @@ elif upload_type == "Video":
         enhanced = apply_enh(frame.copy(), enh_choice)
         to_detect = enhanced if enh_choice != "Ori" else frame
 
-        boxes, _ = detect_image_numpy(to_detect, conf=conf_thres, imgsz=imgsz)
+        boxes = detect_image_numpy(to_detect, conf=conf_thres, imgsz=imgsz, model=model)
         avg_conf = np.mean([b[4] for b in boxes]) if boxes else 0.0
         avg_conf_list.append(avg_conf)
 
@@ -274,12 +286,14 @@ elif upload_type == "Video":
 
     cap.release()
 
-    st.success("✅ Video processing finished — data summary below.")
-    st.subheader("🎬 Video Summary")
+    st.success("Video processing finished — data summary below.")
+    st.subheader("Video Summary")
     st.write(f"**Enhancement:** {enh_choice}")
     st.write(f"**Average Confidence (Overall):** {np.mean(avg_conf_list):.2f}")
     st.write("**Total Objects Detected (All Frames):**")
-    st.json(total_counts_all)
+    summary_video = [{"Class": k, "Total": v} for k, v in total_counts_all.items()]
+    st.table(summary_video)
     if use_region:
         st.write("**Total Objects in Region (All Frames):**")
-        st.json(total_region_counts_all)
+        summary_region_video = [{"Class": k, "Total": v} for k, v in total_region_counts_all.items()]
+        st.table(summary_region_video)

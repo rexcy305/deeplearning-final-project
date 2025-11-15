@@ -1,9 +1,7 @@
-# utils/enhancements.py
 import cv2
 import numpy as np
 
 def hist_eq_color(img):
-    """Histogram Equalization on Y channel (YCrCb). Input BGR numpy array."""
     if len(img.shape) == 2:
         return cv2.equalizeHist(img)
     ycrcb = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
@@ -13,7 +11,6 @@ def hist_eq_color(img):
     return cv2.cvtColor(ycrcb_eq, cv2.COLOR_YCrCb2BGR)
 
 def clahe_color(img, clip=2.0, grid=(8,8)):
-    """CLAHE on L channel in LAB color space."""
     if len(img.shape) == 2:
         clahe = cv2.createCLAHE(clipLimit=clip, tileGridSize=grid)
         return clahe.apply(img)
@@ -25,7 +22,6 @@ def clahe_color(img, clip=2.0, grid=(8,8)):
     return cv2.cvtColor(lab2, cv2.COLOR_LAB2BGR)
 
 def contrast_stretch(img):
-    """Simple contrast stretching (per-channel)."""
     out = img.copy()
     for c in range(out.shape[2]) if out.ndim == 3 else range(1):
         channel = out[:,:,c] if out.ndim == 3 else out
@@ -38,7 +34,6 @@ def contrast_stretch(img):
     return out
 
 def compute_brightness_contrast_metrics(img):
-    """Return simple metrics: mean brightness and std (as proxy for contrast)."""
     if img.ndim == 3:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     else:

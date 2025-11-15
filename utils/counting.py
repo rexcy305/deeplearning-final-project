@@ -4,7 +4,6 @@ def centroid(box):
     return ((x1+x2)/2.0, (y1+y2)/2.0)
 
 def count_all(boxes):
-    """Count all detections per class in the whole frame."""
     counts = {}
     for b in boxes:
         cls = b[5]  # class name
@@ -12,11 +11,6 @@ def count_all(boxes):
     return counts
 
 def count_in_region(boxes, region):
-    """
-    region: (x1,y1,x2,y2)
-    boxes: list as returned by detector
-    returns dict counts per class inside region
-    """
     x1r, y1r, x2r, y2r = region
     counts = {}
     for b in boxes:
